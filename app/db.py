@@ -33,7 +33,6 @@ class DbHelper:
         self.sessionDep = self.get_session
         self.mapper_registry = registry()
         self.metadata_obj = MetaData()
-        print(url)
     # Dependency
 
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:

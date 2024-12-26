@@ -1,7 +1,6 @@
 import enum
 from datetime import date
 from sqlalchemy import Column, String, Table, Uuid, Date, Enum
-from sqlalchemy.dialects.postgresql import ENUM as PgEnum, BYTEA
 from app.db import db_helper
 
 

@@ -7,9 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import db_helper
 from app.user.model import User, Role
 from app.user.schema import UserRead, UserWrite, UserUpdate
+from app.user.model import Role
 
 from .service import (get_all_users, get_user_by_id, get_user_by_email,
-                     create_user, delete_user, get_current_active_user)
+                     create_user, delete_user, get_current_active_user, get_user_by_name)
 
 user_router = APIRouter(
     prefix="/user"
@@ -45,9 +46,21 @@ async def user_by_email(
             AsyncSession,
             Depends(db_helper.sessionDep)
         ],
-        email: str,
+        username: str,
 ) -> UserRead:
-    user = await get_user_by_email(session, email)
+    user = await get_user_by_name(session, username=username)
+    return user
+
+
+@user_router.get("/user_by_username")
+async def user_by_username(
+    session: Annotated[
+            AsyncSession,
+            Depends(db_helper.sessionDep)
+        ],
+        name: str,
+) -> UserRead:
+    user = await get_user_by_name(session, name)
     return user
 
 
@@ -70,7 +83,7 @@ async def create(
         password=password,
         email=email,
         role=role,
-        photo_name=photo.filename,
+        filename=photo.filename.split('.')[1],
         photo_type=photo.content_type,
         photo_data=photo_bytes,
     )
@@ -84,9 +97,20 @@ async def update(
             AsyncSession,
             Depends(db_helper.sessionDep)
         ],
-    user: UserUpdate,
+    username: Annotated[str, Form()],
+    email: Annotated[str, Form()],
+    role: Annotated[Role, Form()],
+    image: UploadFile,
 ) -> str:
-    result = await create_user(session, user)
+    photo = await image.read()
+    new_user = UserWrite(
+        username=username,
+        email=email,
+        role=role,
+        photo_type=image.content_type,
+        photo_data=photo,
+    )
+    result = await create_user(session, new_user)
     return result
 
 
@@ -97,10 +121,6 @@ async def delete(
             Depends(db_helper.sessionDep)
         ],
         user_id: UUID4
-) -> UserRead:
+) -> str:
     result = await delete_user(session, user_id)
     return result
-
-@user_router.get("show_settings")
-async def show() -> str:
-    rmq

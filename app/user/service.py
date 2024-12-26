@@ -3,12 +3,15 @@ import uuid
 from datetime import timezone, datetime, timedelta
 from typing import Annotated, Sequence, Type
 
+import aiohttp
+import requests
+
 import jwt
 from fastapi import Depends, HTTPException, UploadFile
 from fastapi.security import OAuth2PasswordBearer
 from jwt import InvalidTokenError
 from pydantic import UUID4, EmailStr
-from sqlalchemy import select
+from sqlalchemy import select, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.schema import TokenData, Login
@@ -25,7 +28,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 async def get_all_users(
         session: AsyncSession
-) -> Sequence[User]:
+) -> Sequence[UserRead]:
     """
     Получение всех пользователей
     """
@@ -46,17 +49,9 @@ async def get_user_by_id(
     if result is None:
         raise HTTPException(status_code=404, detail="User not found")
     user = result.scalars().first()
-    photo = bytes(user.photo)
-    new = UserRead(
-        username=user.username,
-        email=user.email,
-        role=user.role,
-        photo=photo,
-        liked_manga=user.liked_manga,
-        your_works=user.your_works,
-        date=user.date,
-    )
-    return new
+    photo = await async_http_get(f"http://localhost:8002/object_storage/profile_image?id={user.photo}")
+    user.photo = photo[0]
+    return user
 
 
 async def get_user_by_email(
@@ -71,7 +66,10 @@ async def get_user_by_email(
     result = await session.execute(query)
     if result is None:
         raise HTTPException(status_code=404, detail="User not found")
-    return result.scalars().first()
+    user = result.scalars().first()
+    photo = await async_http_get(f"http://localhost:8002/object_storage/profile_image?id={user.photo}")
+    user.photo = photo[0]
+    return user
 
 
 async def get_user_by_name(
@@ -84,10 +82,12 @@ async def get_user_by_name(
     """
     query = select(User).filter(User.username == username)
     result = await session.execute(query)
-    # TODO Обратиться к S3 хранилищу для картинки профиля
     if result is None:
         raise HTTPException(status_code=404, detail="User not found")
-    return result.scalars().first()
+    user = result.scalars().first()
+    photo = await async_http_get(f"http://localhost:8002/object_storage/profile_image?id={user.photo}")
+    user.photo = photo[0]
+    return user
 
 
 async def create_user(
@@ -98,15 +98,15 @@ async def create_user(
     Создание пользователя
     """
     try:
-        id = uuid.uuid4()
-        jwt_token = create_access_token({'id': str(id)})
-        rmq.put_user_profile_photo(user.photo_name, user.photo_type, user.photo_data)
+        user_id = uuid.uuid4()
+        jwt_token = create_access_token({'id': str(user_id)})
+        photoname = str(user_id) + "." + user.filename
         new = User(
-            id=id,
+            id=user_id,
             username=user.username,
             password=get_password_hash(user.password),
             email=user.email,
-            photo=user.photo_name,
+            photo=photoname,
             liked_manga=None,
             your_works=None,
             date=None,
@@ -115,6 +115,13 @@ async def create_user(
         )
         session.add(new)
         await session.commit()
+
+        rmq.user_profile_photo_operation(
+            operation="user_upload",
+            photo_name=photoname,
+            photo_type=user.photo_type,
+            photo_data=user.photo_data,
+        )
         return jwt_token
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"User not created, {e}")
@@ -131,8 +138,14 @@ async def update_user(
     user = result.scalars().first()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    for field, value in user_update.dict(exclude_unset=True).items():
-        setattr(user, field, value)
+
+    rmq.user_profile_photo_update(
+        operation="user_update",
+        photo_name=str(user.id),
+        photo_type=user.photo_type,
+        photo_data=user.photo_data,
+    )
+    user.photo = user_update.photo_name
     user.password = get_password_hash(user.password)
     await session.commit()
     return user
@@ -140,17 +153,24 @@ async def update_user(
 
 async def delete_user(
         session: AsyncSession,
-        id: UUID4,
+        user_id: UUID4,
 ) -> str:
     try:
-        user = await get_user_by_id(session, id)
-        if user is None:
+        query = select(User).filter(User.id == user_id)
+        result = await session.execute(query)
+        if result is None:
             raise HTTPException(status_code=404, detail="User not found")
-        await session.delete(user)
+        user = result.scalars().first()
+        query = delete(User).where(User.id == user_id)
+        await session.execute(query)
         await session.commit()
+        rmq.user_profile_photo_delete(
+            "user_delete",
+            photo_name=user.photo,
+        )
         return "Пользователь успешно удалён"
     except Exception as e:
-        raise HTTPException(status_code=400, detail="Fail deleted")
+        raise HTTPException(status_code=400, detail=f"Fail deleted {e}")
 
 
 def verify_password(plain_password, hashed_password):
@@ -182,6 +202,7 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     else:
         expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt.access_token_expire_minutes)
     to_encode.update({"exp": expire})
+    print(to_encode)
     encoded_jwt = jwt.encode(to_encode, settings.jwt.secret, algorithm=settings.jwt.algorithm)
     return encoded_jwt
 
@@ -217,8 +238,9 @@ async def get_current_active_user(
     return current_user
 
 
-async def show_settings():
-    return {
-        "rmq_port": settings.rmq.port,
-        "rmq_host": settings.rmq.host,
-    }
+async def async_http_get(url: str):
+    async with aiohttp.ClientSession() as session:
+        content = []
+        response = await session.get(url=url)
+        content.append(await response.text(encoding='UTF-8'))
+    return content

@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from fastapi import UploadFile, File
-from pydantic import BaseModel, EmailStr, UUID4
+from pydantic import BaseModel, EmailStr, UUID4, Field
 from typing import Optional, Annotated
 
 from app.user.model import Role
@@ -18,7 +18,7 @@ class UserBase(BaseModel):
 
 
 class UserRead(UserBase):
-    pass
+    id: UUID4
 
 
 class UserWrite(BaseModel):
@@ -26,14 +26,16 @@ class UserWrite(BaseModel):
     email: str
     password: str
     role: Role
-    photo_name: Optional[str]
     photo_type: Optional[str]
+    filename: Optional[str]
     photo_data: Optional[bytes]
 
 
 class UserUpdate(BaseModel):
     id: UUID4
-    username: Optional[str]
+    username: Annotated[str, Field(min_length=3, max_length=128), None]
     email: Optional[EmailStr]
     role: Optional[str]
-    photo: Optional[UploadFile]
+    photo_type: Optional[str]
+    filename: Optional[str]
+    photo_data: Optional[bytes]

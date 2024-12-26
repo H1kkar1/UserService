@@ -4,7 +4,7 @@ from pydantic import PostgresDsn
 
 
 class RabbitSettings(BaseModel):
-    host: str = "0.0.0.0"
+    host: str = "localhost"
     port: int = 5672
     username: str
     password: str
@@ -34,7 +34,7 @@ class RedisSettings(BaseModel):
 
 
 class RunSettings(BaseModel):
-    host: str = "0.0.0.0"
+    host: str = "localhost"
     port: int = 8001
     reload: bool = True
 
