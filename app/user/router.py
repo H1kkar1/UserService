@@ -1,20 +1,45 @@
-from typing import Annotated, Sequence
+from typing import Annotated, Sequence, Optional
 
 from fastapi import APIRouter, Depends, Form, UploadFile
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import UUID4, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import db_helper
 from app.user.model import User, Role
-from app.user.schema import UserRead, UserWrite, UserUpdate
+from app.user.schema import UserRead, UserWrite, UserUpdate, Login
 from app.user.model import Role
 
 from .service import (get_all_users, get_user_by_id, get_user_by_email,
-                     create_user, delete_user, get_current_active_user, get_user_by_name)
+                      create_user, delete_user, get_my_manga, get_user_by_name,
+                      authenticate_user, oauth2_scheme, get_current_user)
 
 user_router = APIRouter(
-    prefix="/user"
+    prefix="/user",
+    tags=["User"],
 )
+
+
+@user_router.post("/login")
+async def login(
+        session: Annotated[
+            AsyncSession,
+            Depends(db_helper.sessionDep)
+        ],
+        login: Login
+) -> UserRead:
+    user = await authenticate_user(
+        session=session,
+        login=login
+    )
+    return user
+
+
+@user_router.post("jwt_auth")
+async def jwt_auth(
+        current_user: Annotated[User, Depends(get_current_user)]
+) -> UserRead:
+    return current_user
 
 
 @user_router.get("/")
@@ -46,9 +71,9 @@ async def user_by_email(
             AsyncSession,
             Depends(db_helper.sessionDep)
         ],
-        username: str,
+        email: str,
 ) -> UserRead:
-    user = await get_user_by_name(session, username=username)
+    user = await get_user_by_email(session, email=email)
     return user
 
 
@@ -62,6 +87,14 @@ async def user_by_username(
 ) -> UserRead:
     user = await get_user_by_name(session, name)
     return user
+
+
+@user_router.get("my_manga")
+async def all_user_works(
+        user_id: UUID4,
+) -> Sequence[UUID4]:
+    result = get_my_manga(user_id)
+    return result
 
 
 @user_router.post("/create")

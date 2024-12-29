@@ -3,6 +3,41 @@ from pydantic import BaseModel
 from pydantic import PostgresDsn
 
 
+LOG_CONFIG = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'json': {
+            '()': 'app.utils.json_logger.JSONLogFormatter',
+        },
+    },
+    'handlers': {
+        'json': {
+            'formatter': 'json',
+            'class': 'asynclog.AsyncLogDispatcher',
+            'func': 'app.utils.json_logger.write_log',
+        },
+    },
+    'loggers': {
+        'test_project': {
+            'handlers': ['json'],
+            'level': 'DEBUG' if "DEBUG" else 'INFO',
+            'propagate': False,
+        },
+        'uvicorn': {
+            'handlers': ['json'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'uvicorn.access': {
+            'handlers': ['json'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+    },
+}
+
+
 class RabbitSettings(BaseModel):
     host: str = "localhost"
     port: int = 5672

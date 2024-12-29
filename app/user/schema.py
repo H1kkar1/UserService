@@ -39,3 +39,28 @@ class UserUpdate(BaseModel):
     photo_type: Optional[str]
     filename: Optional[str]
     photo_data: Optional[bytes]
+
+
+class Login(BaseModel):
+    username: Optional[str]
+    email: Optional[EmailStr]
+    password: str
+
+
+class Authorization(BaseModel):
+    email: str
+    password: str
+    username: str
+
+
+class Recovery(BaseModel):
+    email: str
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+
+class TokenData(BaseModel):
+    id: UUID4 | None = None

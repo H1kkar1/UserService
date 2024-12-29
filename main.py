@@ -1,15 +1,30 @@
 import uvicorn
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_swagger_ui_html, get_swagger_ui_oauth2_redirect_html, get_redoc_html
+import logging
+from logging.config import dictConfig
 
-from app.config import settings
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from app.utils.middlewares import LoggingMiddleware
+
+from app.config import LOG_CONFIG, settings
 from app.user.router import user_router
+from app.liked_manga.router import like_router
+
+
+dictConfig(LOG_CONFIG)
 
 
 app = FastAPI()
+logger = logging.getLogger("Loginator")
+
+app.middleware('http')(
+    LoggingMiddleware()
+)
 
 app.include_router(user_router)
-
+app.include_router(like_router)
 
 if __name__ == "__main__":
     uvicorn.run(

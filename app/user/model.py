@@ -32,6 +32,7 @@ user = Table(
 )
 
 
+
 class User:
     pass
 

@@ -75,6 +75,20 @@ class BrokerHelper:
                 result = channel.add_on_return_callback(confirm_handler)
                 return result
 
+    def get_user_manga(self, operation: str, user_id: str):
+        with BlockingConnection(self.rmq_parameters) as connection:
+            with connection.channel() as channel:
+                message = json.dumps({
+                        'operation': operation,
+                        'user_id': user_id,
+                    })
+                channel.basic_publish(
+                    exchange='',
+                    routing_key="manga",
+                    body=message)
+                result = channel.add_on_return_callback(confirm_handler)
+                return result
+
 
 
 rmq = BrokerHelper(

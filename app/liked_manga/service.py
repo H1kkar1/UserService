@@ -1,4 +1,5 @@
 import uuid
+from typing import Sequence
 
 from fastapi import HTTPException
 from pydantic import UUID4
@@ -9,16 +10,29 @@ from app.liked_manga.schema import LikeManga
 from app.liked_manga.model import Liked
 
 
+async def show_like_by_user_id(
+        session: AsyncSession,
+        user_id: UUID4,
+) -> Sequence[UUID4]:
+    query = select(Liked).where(Liked.user_id == user_id)
+    result = await session.execute(query)
+    return result.scalars().all()
+
+
 async def like(
         session: AsyncSession,
-        like: LikeManga
+        user_id: UUID4,
+        manga_id: UUID4,
 ) -> str:
     """
     Запись манги в понравившиеся
     """
     id = uuid.uuid4()
-    new = Liked(**like.model_dump())
-    new.like_id = id
+    new = Liked(
+        like_id=id,
+        user_id=user_id,
+        manga_id=manga_id,
+    )
     session.add(new)
     await session.commit()
     return "Добавленно в понравившиеся"

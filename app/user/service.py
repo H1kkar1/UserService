@@ -7,6 +7,7 @@ import aiohttp
 import requests
 
 import jwt
+from aiohttp import ClientConnectorError
 from fastapi import Depends, HTTPException, UploadFile
 from fastapi.security import OAuth2PasswordBearer
 from jwt import InvalidTokenError
@@ -14,7 +15,8 @@ from pydantic import UUID4, EmailStr
 from sqlalchemy import select, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.schema import TokenData, Login
+from app.db import db_helper
+from app.user.schema import TokenData, Login
 from app.config import settings
 from app.user.model import User
 from app.user.schema import UserRead, UserWrite, UserUpdate
@@ -46,29 +48,27 @@ async def get_user_by_id(
     """
     query = select(User).filter(User.id == user_id)
     result = await session.execute(query)
-    if result is None:
-        raise HTTPException(status_code=404, detail="User not found")
     user = result.scalars().first()
-    photo = await async_http_get(f"http://localhost:8002/object_storage/profile_image?id={user.photo}")
-    user.photo = photo[0]
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.photo = await get_profile_photo(user.photo)
     return user
 
 
 async def get_user_by_email(
         session: AsyncSession,
-        email: EmailStr,
+        email: str,
 ) -> User:
     """
     Получить пользователя по email
     Пригодиться в фильтрах посика
     """
-    query = select(User).filter(User.email == email.encode("utf-8"))
+    query = select(User).filter(User.email == email)
     result = await session.execute(query)
-    if result is None:
-        raise HTTPException(status_code=404, detail="User not found")
     user = result.scalars().first()
-    photo = await async_http_get(f"http://localhost:8002/object_storage/profile_image?id={user.photo}")
-    user.photo = photo[0]
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.photo = await get_profile_photo(user.photo)
     return user
 
 
@@ -82,11 +82,10 @@ async def get_user_by_name(
     """
     query = select(User).filter(User.username == username)
     result = await session.execute(query)
-    if result is None:
-        raise HTTPException(status_code=404, detail="User not found")
     user = result.scalars().first()
-    photo = await async_http_get(f"http://localhost:8002/object_storage/profile_image?id={user.photo}")
-    user.photo = photo[0]
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.photo = await get_profile_photo(user.photo)
     return user
 
 
@@ -174,7 +173,9 @@ async def delete_user(
 
 
 def verify_password(plain_password, hashed_password):
-    return True if hashed_password == hashlib.sha256(plain_password) else False
+    plain_password_bytes = plain_password.encode('utf-8')
+    hashed_plain_password = hashlib.sha256(plain_password_bytes).hexdigest()
+    return hashed_plain_password == hashed_password
 
 
 def get_password_hash(password: str) -> str:
@@ -183,15 +184,30 @@ def get_password_hash(password: str) -> str:
     return hex_dig
 
 
-def authenticate_user(
+async def authenticate_user(
         session: AsyncSession,
         login: Login
-):
-    user = get_user_by_name(session, login.username)
+) -> str:
+    if login.username is not None:
+        user = await get_user_by_name(session, login.username)
+
+    elif login.email is not None:
+        user = await get_user_by_email(session, login.email)
+    else:
+        raise HTTPException(
+        status_code=404,
+        detail="Вы не ввели ни имя пользоватея, не email",
+    )
     if not user:
-        return False
+        raise HTTPException(
+            status_code=404,
+            detail="Пользователь не найден",
+        )
     if not verify_password(login.password, user.password):
-        return False
+        raise HTTPException(
+            status_code=404,
+            detail="Пароль введён не верно",
+        )
     return user
 
 
@@ -208,7 +224,10 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
 
 
 async def get_current_user(
-        session: AsyncSession,
+        session: Annotated[
+            AsyncSession,
+            Depends(db_helper.sessionDep)
+        ],
         token: Annotated[str, Depends(oauth2_scheme)]
 ):
     credentials_exception = HTTPException(
@@ -218,24 +237,17 @@ async def get_current_user(
     )
     try:
         payload = jwt.decode(token, settings.jwt.secret, algorithms=[settings.jwt.algorithm])
-        username: str = payload.get("sub")
-        if username is None:
+        user_id: str = payload.get("id")
+        print(user_id)
+        if user_id is None:
             raise credentials_exception
-        token_data = TokenData(username=username)
+        token_data = TokenData(id=user_id)
     except InvalidTokenError:
         raise credentials_exception
-    user = get_user_by_name(session, token_data.username)
+    user = get_user_by_id(session, token_data.id)
     if user is None:
         raise credentials_exception
     return user
-
-
-async def get_current_active_user(
-    current_user: Annotated[User, Depends(get_current_user)],
-):
-    if current_user.disabled:
-        raise HTTPException(status_code=400, detail="Inactive user")
-    return current_user
 
 
 async def async_http_get(url: str):
@@ -244,3 +256,17 @@ async def async_http_get(url: str):
         response = await session.get(url=url)
         content.append(await response.text(encoding='UTF-8'))
     return content
+
+
+async def get_my_manga(
+        user_id: UUID4,
+):
+    rmq.get_user_manga("get_all", user_id)
+
+
+async def get_profile_photo(name: str):
+    try:
+        photo = await async_http_get(f"http://localhost:8002/object_storage/profile_image?id={name}")
+        return photo[0]
+    except ClientConnectorError as e:
+        return "сервер с фотографиями не отвечает"
