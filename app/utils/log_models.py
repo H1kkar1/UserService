@@ -12,7 +12,7 @@ class BaseJsonLogSchema(BaseModel):
     level_name: str
     message: str
     source: str
-    timestamp: str = Field(..., alias='@timestamp')
+    timestamp: str
     app_name: str
     app_version: str
     duration: int

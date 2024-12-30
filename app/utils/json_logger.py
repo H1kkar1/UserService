@@ -34,8 +34,8 @@ class JSONLogFormatter(logging.Formatter):
             .datetime \
             .fromtimestamp(record.created) \
             .astimezone() \
-            .replace(microsecond=0)
-        print(type(record.created))
+            .replace(microsecond=0) \
+            .isoformat()
         message = record.getMessage()
         duration = record.duration \
             if hasattr(record, 'duration') \
